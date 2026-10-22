@@ -19,20 +19,13 @@ object TripOcrParser {
         val lines = rawText.lines().map { it.trim() }.filter { it.isNotBlank() }
         val lower = rawText.lowercase(Locale.ROOT)
         var revenue: Double? = null
-        val labels = listOf("tổng tiền", "doanh thu", "tiền cuốc", "giá cước", "thành tiền", "thu nhập")
+        val labels = listOf("tổng tiền", "doanh thu", "tiền cuốc", "giá cước", "thành tiền", "thu nhập", "tổng thu nhập", "số tiền", "cước phí")
         for (label in labels) {
             val idx = lower.indexOf(label)
             if (idx >= 0) {
                 val tail = rawText.substring((idx + label.length).coerceAtMost(rawText.length)).take(80)
                 val m = moneyPattern.matcher(tail)
                 if (m.find()) { revenue = parseMoney(m.group(1)); if (revenue != null) break }
-            }
-        }
-        if (revenue == null) {
-            val m = moneyPattern.matcher(rawText)
-            while (m.find()) {
-                val value = parseMoney(m.group(1))
-                if (value != null && value >= 1000.0) { revenue = value; break }
             }
         }
         var timestamp: Long? = null
