@@ -26,7 +26,7 @@ object TripOcrParser {
 
     fun parse(rawText: String): TripOcrResult {
         val lines = rawText.lines().map { it.trim().replace(Regex("""\s+"""), " ") }.filter { it.isNotBlank() }
-        val normalized = lines.map { it.lowercase(Locale("vi", "VN")).replace(Regex("""^\\s*\\d+\\s*[.)-]?\\s*"""), "").trim() }
+        val normalized = lines.map { it.lowercase(Locale("vi", "VN")).replace(Regex("""^\s*\d+\s*[.)-]?\s*"""), "").trim() }
         var revenue: Double? = null
         val revenueLabels = listOf("khách thanh toán", "thành tiền", "tổng tiền", "doanh thu",
             "tiền cuốc", "giá cước", "cước phí", "thu nhập", "tổng thu nhập")
@@ -50,7 +50,7 @@ object TripOcrParser {
                 val parsed = runCatching { format.isLenient = false; format.parse(dateMatch)?.time }.getOrNull()
                 if (parsed != null) {
                     timestamp = parsed
-                    if (!Regex("""[/-]\\d{2,4}\\s""").containsMatchIn(dateMatch)) {
+                    if (!Regex("""[/-]\d{2,4}\s""").containsMatchIn(dateMatch)) {
                         timestamp = Calendar.getInstance().apply {
                             timeInMillis = parsed
                             set(Calendar.YEAR, Calendar.getInstance().get(Calendar.YEAR))
@@ -62,7 +62,7 @@ object TripOcrParser {
         }
         // When no trip date is printed, use the Android status-bar clock and today's local date.
         if (timestamp == null) {
-            val clock = lines.firstNotNullOfOrNull { Regex("""^\\s*(\\d{1,2}):(\\d{2})(?:\\s|$)""").find(it) }
+            val clock = lines.firstNotNullOfOrNull { Regex("""(\d{1,2}):(\d{2})""").find(it) }
             if (clock != null) {
                 val hour = clock.groupValues[1].toIntOrNull()
                 val minute = clock.groupValues[2].toIntOrNull()
