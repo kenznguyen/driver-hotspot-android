@@ -7,6 +7,11 @@ import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.activity.compose.rememberLauncherForActivityResult
+import android.net.Uri
+import com.google.mlkit.vision.common.InputImage
+import com.google.mlkit.vision.text.TextRecognition
+import com.google.mlkit.vision.text.latin.TextRecognizerOptions
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -26,7 +31,7 @@ import java.util.Date
 import java.util.Locale
 import kotlin.math.max
 
-data class Trip(val time: Long, val zone: String, val revenue: Double, val cost: Double, val startBattery: Int, val endBattery: Int, val note: String) {
+data class Trip(val time: Long, val zone: String, val revenue: Double, val cost: Double, val startBattery: Int, val endBattery: Int, val note: String, val pickup: String = "", val dropoff: String = "") {
     val net get() = revenue - cost
     val batteryUsed get() = max(0, startBattery - endBattery)
     val netPerPercent get() = if (batteryUsed > 0) net / batteryUsed else 0.0
@@ -48,14 +53,38 @@ class MainActivity : ComponentActivity() {
         var startBattery by remember { mutableStateOf("80") }
         var endBattery by remember { mutableStateOf("70") }
         var note by remember { mutableStateOf("") }
+        var pickup by remember { mutableStateOf("") }
+        var dropoff by remember { mutableStateOf("") }
+        var tripTime by remember { mutableLongStateOf(System.currentTimeMillis()) }
+        var ocrStatus by remember { mutableStateOf("OCR xử lý trên thiết bị; hãy kiểm tra trước khi lưu.") }
         var refresh by remember { mutableIntStateOf(0) }
         val trips = remember(refresh) {
             runCatching { JSONArray(prefs.getString("trips", "[]")).let { a -> (0 until a.length()).map { i ->
-                val o=a.getJSONObject(i); Trip(o.getLong("time"),o.optString("zone"),o.optDouble("revenue"),o.optDouble("cost"),o.optInt("startBattery"),o.optInt("endBattery"),o.optString("note"))
+                val o=a.getJSONObject(i); Trip(o.getLong("time"),o.optString("zone"),o.optDouble("revenue"),o.optDouble("cost"),o.optInt("startBattery"),o.optInt("endBattery"),o.optString("note"),o.optString("pickup"),o.optString("dropoff"))
             }.reversed() } }.getOrDefault(emptyList())
         }
         val points = remember(refresh) { prefs.getString("points", "").orEmpty().lines().filter { it.count { c -> c == ',' } >= 3 } }
         val fmt = { v: Double -> String.format(Locale("vi","VN"), "%,.0f đ", v) }
+        val imagePicker = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri: Uri? ->
+            if (uri != null) {
+                ocrStatus = "Đang đọc ảnh trên thiết bị…"
+                runCatching { InputImage.fromFilePath(this@MainActivity, uri) }
+                    .onSuccess { image ->
+                        TextRecognition.getClient(TextRecognizerOptions.DEFAULT_OPTIONS).process(image)
+                            .addOnSuccessListener { result ->
+                                val parsed = TripOcrParser.parse(result.text)
+                                if (parsed.revenue != null) revenue = parsed.revenue.toLong().toString()
+                                if (parsed.timestamp != null) tripTime = parsed.timestamp
+                                if (parsed.pickup.isNotBlank()) pickup = parsed.pickup
+                                if (parsed.dropoff.isNotBlank()) dropoff = parsed.dropoff
+                                if (zone.isBlank()) zone = parsed.pickup.ifBlank { parsed.dropoff }
+                                ocrStatus = "Đã đọc ảnh. Tiền: " + (if (parsed.revenue != null) "đã nhận diện" else "chưa nhận diện") + ". Kiểm tra các trường rồi mới lưu."
+                            }
+                            .addOnFailureListener { ocrStatus = "Không đọc được ảnh. Hãy chọn ảnh khác hoặc nhập thủ công." }
+                    }
+                    .onFailure { ocrStatus = "Không mở được ảnh. Hãy chọn ảnh khác." }
+            }
+        }
         Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
             Text("DRIVER HOTSPOT", style = MaterialTheme.typography.headlineMedium)
             Text("Nhật ký hành trình • Điểm nóng • Hiệu quả pin", color = Color.LightGray)
@@ -75,9 +104,14 @@ class MainActivity : ComponentActivity() {
                 Text("Vị trí chỉ được lưu trên thiết bị. Không đọc màn hình, không Accessibility, không giả lập GPS.", style = MaterialTheme.typography.bodySmall)
             } }
             Card { Column(Modifier.fillMaxWidth().padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Text("NHẬP CUỐC THỦ CÔNG", style = MaterialTheme.typography.titleMedium)
+                Text("NHẬP CUỐC XE", style = MaterialTheme.typography.titleMedium)
+                OutlinedButton(onClick = { imagePicker.launch("image/*") }, modifier = Modifier.fillMaxWidth()) { Text("Chọn ảnh chi tiết cuốc Xanh SM (OCR)") }
+                Text(ocrStatus, style = MaterialTheme.typography.bodySmall, color = Color.LightGray)
+                Text("Thời gian cuốc: " + SimpleDateFormat("dd/MM/yyyy HH:mm", Locale("vi","VN")).format(Date(tripTime)), style = MaterialTheme.typography.bodySmall)
                 OutlinedTextField(zone, {zone=it}, label={Text("Khu vực / tên quán")}, modifier=Modifier.fillMaxWidth(), singleLine=true)
                 OutlinedTextField(revenue, {revenue=it}, label={Text("Doanh thu (đ)")}, modifier=Modifier.fillMaxWidth(), singleLine=true)
+                OutlinedTextField(pickup, {pickup=it}, label={Text("Điểm đón (OCR, có thể sửa)")}, modifier=Modifier.fillMaxWidth(), singleLine=true)
+                OutlinedTextField(dropoff, {dropoff=it}, label={Text("Điểm trả (OCR, có thể sửa)")}, modifier=Modifier.fillMaxWidth(), singleLine=true)
                 OutlinedTextField(cost, {cost=it}, label={Text("Chi phí cuốc (đ)")}, modifier=Modifier.fillMaxWidth(), singleLine=true)
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     OutlinedTextField(startBattery, {startBattery=it.filter(Char::isDigit).take(3)}, label={Text("Pin đầu (%)")}, modifier=Modifier.weight(1f), singleLine=true)
@@ -90,9 +124,9 @@ class MainActivity : ComponentActivity() {
                     val sb=startBattery.toIntOrNull(); val eb=endBattery.toIntOrNull()
                     if (zone.isNotBlank() && r != null && c != null && sb != null && eb != null && sb in 0..100 && eb in 0..100) {
                         val arr=runCatching { JSONArray(prefs.getString("trips","[]")) }.getOrDefault(JSONArray())
-                        arr.put(JSONObject().put("time",System.currentTimeMillis()).put("zone",zone.trim()).put("revenue",r).put("cost",c).put("startBattery",sb).put("endBattery",eb).put("note",note.trim()))
+                        arr.put(JSONObject().put("time",tripTime).put("zone",zone.trim()).put("revenue",r).put("cost",c).put("startBattery",sb).put("endBattery",eb).put("note",note.trim()).put("pickup",pickup.trim()).put("dropoff",dropoff.trim()))
                         prefs.edit().putString("trips",arr.toString()).apply()
-                        zone=""; revenue=""; note=""; refresh++
+                        zone=""; revenue=""; note=""; pickup=""; dropoff=""; tripTime=System.currentTimeMillis(); ocrStatus="OCR xử lý trên thiết bị; hãy kiểm tra trước khi lưu."; refresh++
                     }
                 }, modifier=Modifier.fillMaxWidth()) { Text("Lưu cuốc") }
             } }
@@ -129,6 +163,8 @@ class MainActivity : ComponentActivity() {
                     Text(trip.zone, style = MaterialTheme.typography.titleMedium)
                     Text(SimpleDateFormat("dd/MM HH:mm", Locale("vi","VN")).format(Date(trip.time)))
                     Text("Ròng: ${fmt(trip.net)} • Pin: ${trip.batteryUsed}% • ${fmt(trip.netPerPercent)}/1% pin")
+                    if(trip.pickup.isNotBlank()) Text("Đón: " + trip.pickup)
+                    if(trip.dropoff.isNotBlank()) Text("Trả: " + trip.dropoff)
                     if(trip.note.isNotBlank()) Text(trip.note)
                 } }
             }
