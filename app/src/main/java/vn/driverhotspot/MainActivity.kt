@@ -3,6 +3,8 @@ package vn.driverhotspot
 import android.Manifest
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.location.Location
+import android.location.LocationManager
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -44,6 +46,26 @@ class MainActivity : ComponentActivity() {
         permissionLauncher.launch(needed)
         setContent { MaterialTheme(colorScheme = darkColorScheme()) { Dashboard() } }
     }
+    private fun openNearbyRestaurants(radiusMeters: Int) {
+        val locationManager = getSystemService(LOCATION_SERVICE) as LocationManager
+        val hasFine = ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED
+        val hasCoarse = ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_COARSE_LOCATION) == PackageManager.PERMISSION_GRANTED
+        val lastLocation: Location? = if (hasFine || hasCoarse) {
+            runCatching {
+                listOf(LocationManager.NETWORK_PROVIDER, LocationManager.GPS_PROVIDER)
+                    .mapNotNull { provider -> runCatching { locationManager.getLastKnownLocation(provider) }.getOrNull() }
+                    .maxByOrNull { it.time }
+            }.getOrNull()
+        } else null
+        val radiusLabel = if (radiusMeters >= 1000) "${radiusMeters / 1000} km" else "${radiusMeters} m"
+        val query = if (lastLocation != null) {
+            "restaurants and cafes near ${lastLocation.latitude},${lastLocation.longitude} within ${radiusLabel}"
+        } else {
+            "restaurants and cafes near me within ${radiusLabel}"
+        }
+        val intent = Intent(Intent.ACTION_VIEW, Uri.parse("https://www.google.com/maps/search/?api=1&query=${Uri.encode(query)}"))
+        startActivity(intent)
+    }
     private fun openMaps(address: String) {
         val query = Uri.encode(address.trim())
         if (query.isBlank()) return
@@ -61,6 +83,7 @@ class MainActivity : ComponentActivity() {
         var tripTime by remember { mutableLongStateOf(System.currentTimeMillis()) }
         var ocrStatus by remember { mutableStateOf("OCR xử lý trên thiết bị; hãy kiểm tra trước khi lưu.") }
         var refresh by remember { mutableIntStateOf(0) }
+        var nearbyRadius by remember { mutableIntStateOf(1000) }
         val trips = remember(refresh) {
             runCatching { JSONArray(prefs.getString("trips", "[]")).let { a -> (0 until a.length()).map { i ->
                 val o=a.getJSONObject(i); Trip(o.getLong("time"),o.optString("zone"),o.optDouble("revenue"),o.optDouble("cost"),o.optInt("startBattery"),o.optInt("endBattery"),o.optString("note"),o.optString("pickup"),o.optString("dropoff"),o.optString("placeName"))
@@ -132,6 +155,21 @@ class MainActivity : ComponentActivity() {
                         }
                     } else ocrStatus = "Cần có địa chỉ điểm đón để đưa vào bản đồ nhiệt."
                 }, modifier=Modifier.fillMaxWidth()) { Text("Lưu điểm nhu cầu") }
+            } }
+            Card { Column(Modifier.fillMaxWidth().padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text("QUÁN QUANH TÔI", style = MaterialTheme.typography.titleMedium)
+                Text("Tìm quán ăn/cà phê bằng Google Maps miễn phí. Ứng dụng chỉ gửi truy vấn tìm kiếm và tọa độ gần nhất nếu Android đã có vị trí; không thu thập vị trí mới ở chế độ này.", style = MaterialTheme.typography.bodySmall)
+                SingleChoiceSegmentedButtonRow(modifier = Modifier.fillMaxWidth()) {
+                    listOf(500, 1000, 3000).forEachIndexed { i, meters ->
+                        SegmentedButton(selected = nearbyRadius == meters, onClick = { nearbyRadius = meters }, shape = SegmentedButtonDefaults.itemShape(index = i, count = 3)) {
+                            Text(if (meters < 1000) "500 m" else "${meters / 1000} km")
+                        }
+                    }
+                }
+                Button(onClick = { openNearbyRestaurants(nearbyRadius) }, modifier = Modifier.fillMaxWidth()) {
+                    Text("Tìm quán trên Google Maps")
+                }
+                Text("Lưu ý: bán kính là lựa chọn tham khảo trong truy vấn; Google Maps có thể hiển thị kết quả ngoài bán kính này. Không có API trả phí hoặc danh sách quán nhúng trong app ở bản miễn phí.", style = MaterialTheme.typography.bodySmall, color = Color.LightGray)
             } }
             var days by remember { mutableIntStateOf(7) }
             val cutoff = System.currentTimeMillis() - days.toLong() * 24L * 60L * 60L * 1000L
