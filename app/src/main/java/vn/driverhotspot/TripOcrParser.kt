@@ -25,20 +25,17 @@ object TripOcrParser {
 
     fun parse(rawText: String): TripOcrResult {
         val lines = rawText.lines().map { it.trim().replace(Regex("""\s+"""), " ") }.filter { it.isNotBlank() }
-        val normalized = lines.map { it.lowercase(Locale("vi", "VN")).replace('đ', 'd') }
+        val normalized = lines.map { it.lowercase(Locale("vi", "VN")) }
         var revenue: Double? = null
-
-        // The amount paid by the customer is the post-discount trip revenue.
         val revenueLabels = listOf("khách thanh toán", "thành tiền", "tổng tiền", "doanh thu",
             "tiền cuốc", "giá cước", "cước phí", "thu nhập", "tổng thu nhập")
         for (label in revenueLabels) {
             val index = normalized.indexOfFirst { it.contains(label) }
             if (index < 0) continue
-            for (candidate in listOf(lines[index]) + listOfNotNull(lines.getOrNull(index + 1))) {
-                val tail = if (normalized[index].contains(label) && candidate == lines[index]) {
-                    candidate.substringAfter(':', "").ifBlank { candidate }
-                } else candidate
-                val match = moneyRegex.findAll(tail).lastOrNull() ?: continue
+            val sameLine = lines[index].substringAfter(':', "").ifBlank { lines[index].takeIf { it.contains(':') }.orEmpty() }
+            val candidates = listOf(sameLine) + listOfNotNull(lines.getOrNull(index + 1))
+            for (candidate in candidates) {
+                val match = moneyRegex.findAll(candidate).lastOrNull() ?: continue
                 val parsed = parseMoney(match.value)
                 if (parsed != null) { revenue = parsed; break }
             }
@@ -53,11 +50,10 @@ object TripOcrParser {
                 if (parsed != null) {
                     timestamp = parsed
                     if (!Regex("""[/-]\d{2,4}\s""").containsMatchIn(dateMatch)) {
-                        val cal = Calendar.getInstance().apply {
+                        timestamp = Calendar.getInstance().apply {
                             timeInMillis = parsed
                             set(Calendar.YEAR, Calendar.getInstance().get(Calendar.YEAR))
-                        }
-                        timestamp = cal.timeInMillis
+                        }.timeInMillis
                     }
                     break
                 }
@@ -78,17 +74,18 @@ object TripOcrParser {
             }
             if (section == "pickup") {
                 if (pickup.isBlank() && !isNonLocationLine(n)) pickup = line
-                else if (pickup.isNotBlank() && isAddressContinuation(n)) pickup = "$pickup, $line"
+                else if (pickup.isNotBlank() && isAddressContinuation(n)) pickup = appendAddress(pickup, line)
             } else if (section == "dropoff") {
                 if (dropoff.isBlank() && !isNonLocationLine(n)) dropoff = line
-                else if (dropoff.isNotBlank() && isAddressContinuation(n)) dropoff = "$dropoff, $line"
+                else if (dropoff.isNotBlank() && isAddressContinuation(n)) dropoff = appendAddress(dropoff, line)
             }
             if (n.startsWith("cước phí chuyến đi") || n == "cước phí" || n == "giảm giá" ||
                 n.startsWith("khách thanh toán") || n == "nhắn tin" || n == "gọi điện") section = ""
         }
-        return TripOcrResult(revenue, timestamp, pickup.replace(Regex(""",\s*,"""), ",").trim(), dropoff.replace(Regex(""",\s*,"""), ",").trim())
+        return TripOcrResult(revenue, timestamp, pickup.trim(), dropoff.trim())
     }
 
+    private fun appendAddress(existing: String, next: String) = existing.trimEnd().trimEnd(',') + ", " + next.trimStart()
     private fun inlineValue(line: String) = line.substringAfter(':', "").trim()
     private fun isAddressContinuation(n: String) = listOf("đường", "phường", "thành phố", "quận", "huyện", "việt nam", "tỉnh").any(n::contains)
     private fun isNonLocationLine(n: String) = n.startsWith("cước phí") || n.startsWith("giảm giá") ||
