@@ -8,7 +8,8 @@ data class TripOcrResult(
     val revenue: Double? = null,
     val timestamp: Long? = null,
     val pickup: String = "",
-    val dropoff: String = ""
+    val dropoff: String = "",
+    val placeName: String = ""
 )
 
 object TripOcrParser {
@@ -62,10 +63,16 @@ object TripOcrParser {
 
         var pickup = ""
         var dropoff = ""
+        var placeName = ""
         var section = ""
         for (i in lines.indices) {
             val line = lines[i]
             val n = normalized[i]
+            if (n.startsWith("tên quán") || n.startsWith("tên địa điểm") || n.startsWith("nhà hàng") || n.startsWith("cửa hàng")) {
+                placeName = inlineValue(line).ifBlank { line.substringAfter(Regex(":"), "").trim() }
+                section = ""
+                continue
+            }
             if (n.startsWith("điểm đón khách") || n == "điểm đón" || n == "đón khách" || n == "địa chỉ đón") {
                 section = "pickup"; pickup = inlineValue(line); continue
             }
@@ -82,7 +89,7 @@ object TripOcrParser {
             if (n.startsWith("cước phí chuyến đi") || n == "cước phí" || n == "giảm giá" ||
                 n.startsWith("khách thanh toán") || n == "nhắn tin" || n == "gọi điện") section = ""
         }
-        return TripOcrResult(revenue, timestamp, pickup.trim(), dropoff.trim())
+        return TripOcrResult(revenue, timestamp, pickup.trim(), dropoff.trim(), placeName.trim())
     }
 
     private fun appendAddress(existing: String, next: String) = existing.trimEnd().trimEnd(',') + ", " + next.trimStart()
