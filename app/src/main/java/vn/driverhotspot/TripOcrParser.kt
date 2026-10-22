@@ -50,13 +50,29 @@ object TripOcrParser {
                 val parsed = runCatching { format.isLenient = false; format.parse(dateMatch)?.time }.getOrNull()
                 if (parsed != null) {
                     timestamp = parsed
-                    if (!Regex("""[/-]\d{2,4}\s""").containsMatchIn(dateMatch)) {
+                    if (!Regex("""[/-]\\d{2,4}\\s""").containsMatchIn(dateMatch)) {
                         timestamp = Calendar.getInstance().apply {
                             timeInMillis = parsed
                             set(Calendar.YEAR, Calendar.getInstance().get(Calendar.YEAR))
                         }.timeInMillis
                     }
                     break
+                }
+            }
+        }
+        // When no trip date is printed, use the Android status-bar clock and today's local date.
+        if (timestamp == null) {
+            val clock = lines.firstNotNullOfOrNull { Regex("""^\\s*(\\d{1,2}):(\\d{2})(?:\\s|$)""").find(it) }
+            if (clock != null) {
+                val hour = clock.groupValues[1].toIntOrNull()
+                val minute = clock.groupValues[2].toIntOrNull()
+                if (hour != null && minute != null && hour in 0..23 && minute in 0..59) {
+                    timestamp = Calendar.getInstance().apply {
+                        set(Calendar.HOUR_OF_DAY, hour)
+                        set(Calendar.MINUTE, minute)
+                        set(Calendar.SECOND, 0)
+                        set(Calendar.MILLISECOND, 0)
+                    }.timeInMillis
                 }
             }
         }
@@ -71,14 +87,14 @@ object TripOcrParser {
             val cardLines = lines.drop(orderCardIndex + 1).take(8)
             placeName = cardLines.firstOrNull { line ->
                 val n = line.lowercase(Locale("vi", "VN"))
-                !isNonLocationLine(n) && !n.startsWith("mã đơn") && !n.startsWith("danh sách món") &&
+                isLikelyLocation(line) && !isNonLocationLine(n) && !n.startsWith("mã đơn") && !n.startsWith("danh sách món") &&
                     !n.startsWith("gọi quán") && !n.startsWith("điều hướng") &&
                     !n.startsWith("đã nhận đơn") && !n.startsWith("địa đi") &&
                     !Regex("""^\d+\s*\.\s*""").containsMatchIn(n)
             }.orEmpty()
             pickup = cardLines.firstOrNull { line ->
                 val n = line.lowercase(Locale("vi", "VN"))
-                (n.contains("đường") || n.contains("phường") || n.contains("thành phố") ||
+                isLikelyLocation(line) && (n.contains("đường") || n.contains("phường") || n.contains("thành phố") ||
                     n.contains("quận") || n.contains("huyện") || Regex("""\b\d{1,4}[a-z]?\s+[^,]+""").containsMatchIn(n)) &&
                     !n.startsWith("mã đơn")
             }.orEmpty()
@@ -101,10 +117,10 @@ object TripOcrParser {
                 section = "dropoff"; dropoff = inlineValue(line); continue
             }
             if (section == "pickup") {
-                if (pickup.isBlank() && !isNonLocationLine(n)) pickup = line
+                if (pickup.isBlank() && isLikelyLocation(line) && !isNonLocationLine(n)) pickup = line
                 else if (pickup.isNotBlank() && isAddressContinuation(n)) pickup = appendAddress(pickup, line)
             } else if (section == "dropoff") {
-                if (dropoff.isBlank() && !isNonLocationLine(n)) dropoff = line
+                if (dropoff.isBlank() && isLikelyLocation(line) && !isNonLocationLine(n)) dropoff = line
                 else if (dropoff.isNotBlank() && isAddressContinuation(n)) dropoff = appendAddress(dropoff, line)
             }
             if (n.startsWith("cước phí chuyến đi") || n == "cước phí" || n == "giảm giá" ||
@@ -113,6 +129,16 @@ object TripOcrParser {
         return TripOcrResult(revenue, timestamp, pickup.trim(), dropoff.trim(), placeName.trim())
     }
 
+    private fun isLikelyLocation(line: String): Boolean {
+        val value = line.trim()
+        if (value.length < 3) return false
+        val letters = value.count { it.isLetter() }
+        val digits = value.count { it.isDigit() }
+        val symbols = value.count { !it.isLetterOrDigit() && !it.isWhitespace() }
+        if (letters < 3 || symbols > letters + digits) return false
+        if (Regex("""^[\\d\\s.,|<>/\\-]+$""").matches(value)) return false
+        return true
+    }
     private fun appendAddress(existing: String, next: String) = existing.trimEnd().trimEnd(',') + ", " + next.trimStart()
     private fun inlineValue(line: String) = line.substringAfter(':', "").trim()
     private fun isAddressContinuation(n: String) = listOf("đường", "phường", "thành phố", "quận", "huyện", "việt nam", "tỉnh").any(n::contains)
