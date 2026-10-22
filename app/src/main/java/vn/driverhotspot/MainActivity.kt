@@ -44,19 +44,26 @@ class MainActivity : ComponentActivity() {
         permissionLauncher.launch(needed)
         setContent { MaterialTheme(colorScheme = darkColorScheme()) { Dashboard() } }
     }
+    private fun openMaps(address: String) {
+        val query = Uri.encode(address.trim())
+        if (query.isBlank()) return
+        val intent = Intent(Intent.ACTION_VIEW, Uri.parse("https://www.google.com/maps/search/?api=1&query=$query"))
+        startActivity(intent)
+    }
     @Composable private fun Dashboard() {
         val prefs = getSharedPreferences("driver_hotspot", MODE_PRIVATE)
         var tracking by remember { mutableStateOf(prefs.getBoolean("tracking", false)) }
         var zone by remember { mutableStateOf("") }
         var note by remember { mutableStateOf("") }
         var pickup by remember { mutableStateOf("") }
+        var placeName by remember { mutableStateOf("") }
         var dropoff by remember { mutableStateOf("") }
         var tripTime by remember { mutableLongStateOf(System.currentTimeMillis()) }
         var ocrStatus by remember { mutableStateOf("OCR xử lý trên thiết bị; hãy kiểm tra trước khi lưu.") }
         var refresh by remember { mutableIntStateOf(0) }
         val trips = remember(refresh) {
             runCatching { JSONArray(prefs.getString("trips", "[]")).let { a -> (0 until a.length()).map { i ->
-                val o=a.getJSONObject(i); Trip(o.getLong("time"),o.optString("zone"),o.optDouble("revenue"),o.optDouble("cost"),o.optInt("startBattery"),o.optInt("endBattery"),o.optString("note"),o.optString("pickup"),o.optString("dropoff"))
+                val o=a.getJSONObject(i); Trip(o.getLong("time"),o.optString("zone"),o.optDouble("revenue"),o.optDouble("cost"),o.optInt("startBattery"),o.optInt("endBattery"),o.optString("note"),o.optString("pickup"),o.optString("dropoff"),o.optString("placeName"))
             }.reversed() } }.getOrDefault(emptyList())
         }
         val points = remember(refresh) { prefs.getString("points", "").orEmpty().lines().filter { it.count { c -> c == ',' } >= 3 } }
@@ -71,6 +78,7 @@ class MainActivity : ComponentActivity() {
                                 val parsed = TripOcrParser.parse(result.text)
                                 if (parsed.timestamp != null) tripTime = parsed.timestamp
                                 if (parsed.pickup.isNotBlank()) pickup = parsed.pickup
+                                if (parsed.placeName.isNotBlank()) placeName = parsed.placeName
                                 if (parsed.dropoff.isNotBlank()) dropoff = parsed.dropoff
                                 if (zone.isBlank()) zone = parsed.pickup.ifBlank { parsed.dropoff }
                                 ocrStatus = "Đã đọc ảnh. Kiểm tra điểm đón và thời gian trước khi lưu."
@@ -103,8 +111,11 @@ class MainActivity : ComponentActivity() {
                 OutlinedButton(onClick = { imagePicker.launch("image/*") }, modifier = Modifier.fillMaxWidth()) { Text("Chọn ảnh chi tiết cuốc Xanh SM (OCR)") }
                 Text(ocrStatus, style = MaterialTheme.typography.bodySmall, color = Color.LightGray)
                 Text("Thời gian cuốc: " + SimpleDateFormat("dd/MM/yyyy HH:mm", Locale("vi","VN")).format(Date(tripTime)), style = MaterialTheme.typography.bodySmall)
+                OutlinedTextField(placeName, {placeName=it}, label={Text("Tên quán / địa điểm đón (nếu có)")}, modifier=Modifier.fillMaxWidth(), singleLine=true)
                 OutlinedTextField(pickup, {pickup=it}, label={Text("Điểm đón (OCR, có thể sửa)")}, modifier=Modifier.fillMaxWidth(), singleLine=true)
                 OutlinedTextField(dropoff, {dropoff=it}, label={Text("Điểm trả (OCR, có thể sửa)")}, modifier=Modifier.fillMaxWidth(), singleLine=true)
+                OutlinedButton(onClick = { openMaps(pickup) }, enabled = pickup.isNotBlank(), modifier=Modifier.fillMaxWidth()) { Text("Mở điểm đón trên Google Maps") }
+                OutlinedButton(onClick = { openMaps(dropoff) }, enabled = dropoff.isNotBlank(), modifier=Modifier.fillMaxWidth()) { Text("Mở điểm trả trên Google Maps") }
                 Button(onClick = {
                     val address = pickup.trim()
                     if (address.isNotBlank()) {
@@ -115,9 +126,9 @@ class MainActivity : ComponentActivity() {
                         }
                         if (duplicate) { ocrStatus = "Có vẻ cuốc này đã lưu trong vòng 2 phút; không lưu trùng." }
                         else {
-                            arr.put(JSONObject().put("time", tripTime).put("zone", address).put("revenue", 0).put("cost", 0).put("startBattery", 0).put("endBattery", 0).put("note", "").put("pickup", address).put("dropoff", dropoff.trim()))
+                            arr.put(JSONObject().put("time", tripTime).put("zone", address).put("revenue", 0).put("cost", 0).put("startBattery", 0).put("endBattery", 0).put("note", "").put("pickup", address).put("dropoff", dropoff.trim()).put("placeName", placeName.trim()))
                             prefs.edit().putString("trips", arr.toString()).apply()
-                            pickup = ""; dropoff = ""; tripTime = System.currentTimeMillis(); ocrStatus = "Đã lưu quan sát điểm đón."; refresh++
+                            pickup = ""; dropoff = ""; placeName = ""; tripTime = System.currentTimeMillis(); ocrStatus = "Đã lưu quan sát điểm đón."; refresh++
                         }
                     } else ocrStatus = "Cần có địa chỉ điểm đón để đưa vào bản đồ nhiệt."
                 }, modifier=Modifier.fillMaxWidth()) { Text("Lưu điểm nhu cầu") }
@@ -151,11 +162,11 @@ class MainActivity : ComponentActivity() {
             if (trips.isEmpty()) Text("Chưa có cuốc. Dữ liệu mẫu không được tạo tự động.")
             trips.forEach { trip ->
                 Card { Column(Modifier.fillMaxWidth().padding(12.dp), verticalArrangement = Arrangement.spacedBy(3.dp)) {
-                    Text(trip.zone, style = MaterialTheme.typography.titleMedium)
+                    Text(trip.placeName.ifBlank { trip.zone }, style = MaterialTheme.typography.titleMedium)
                     Text(SimpleDateFormat("dd/MM HH:mm", Locale("vi","VN")).format(Date(trip.time)))
 
-                    if(trip.pickup.isNotBlank()) Text("Đón: " + trip.pickup)
-                    if(trip.dropoff.isNotBlank()) Text("Trả: " + trip.dropoff)
+                    if(trip.pickup.isNotBlank()) { Text("Đón: " + trip.pickup); TextButton(onClick = { openMaps(trip.pickup) }) { Text("Mở điểm đón trên Google Maps") } }
+                    if(trip.dropoff.isNotBlank()) { Text("Trả: " + trip.dropoff); TextButton(onClick = { openMaps(trip.dropoff) }) { Text("Mở điểm trả trên Google Maps") } }
                 } }
             }
             OutlinedButton(onClick = {
