@@ -69,7 +69,7 @@ object TripOcrParser {
             val line = lines[i]
             val n = normalized[i]
             if (n.startsWith("tên quán") || n.startsWith("tên địa điểm") || n.startsWith("nhà hàng") || n.startsWith("cửa hàng")) {
-                placeName = inlineValue(line).ifBlank { line.substringAfter(Regex(":"), "").trim() }
+                placeName = inlineValue(line)
                 section = ""
                 continue
             }
