@@ -171,7 +171,7 @@ class MainActivity : ComponentActivity() {
             OutlinedButton(onClick = {
                 val data = buildString {
                     append("timestamp,zone,revenue,cost,start_battery,end_battery,net,pickup,dropoff\n")
-                    trips.reversed().forEach { append("${it.time},\"${it.zone.replace("\"","")}\",${it.revenue},${it.cost},${it.startBattery},${it.endBattery},${it.net},\"${it.pickup.replace("\"","")}\",\"${it.dropoff.replace("\"","")}\",\n") }
+                    trips.reversed().forEach { append("${it.time},\"${it.zone.replace("\"","")}\",${it.revenue},${it.cost},${it.startBattery},${it.endBattery},${it.net},\"${it.pickup.replace("\"","")}\",\"${it.dropoff.replace("\"","")}\"\n") }
                 }
                 val name="driver-hotspot-trips.csv"
                 getExternalFilesDir(null)?.resolve(name)?.writeText(data)
