@@ -48,10 +48,6 @@ class MainActivity : ComponentActivity() {
         val prefs = getSharedPreferences("driver_hotspot", MODE_PRIVATE)
         var tracking by remember { mutableStateOf(prefs.getBoolean("tracking", false)) }
         var zone by remember { mutableStateOf("") }
-        var revenue by remember { mutableStateOf("") }
-        var cost by remember { mutableStateOf("0") }
-        var startBattery by remember { mutableStateOf("80") }
-        var endBattery by remember { mutableStateOf("70") }
         var note by remember { mutableStateOf("") }
         var pickup by remember { mutableStateOf("") }
         var dropoff by remember { mutableStateOf("") }
@@ -73,12 +69,11 @@ class MainActivity : ComponentActivity() {
                         TextRecognition.getClient(TextRecognizerOptions.DEFAULT_OPTIONS).process(image)
                             .addOnSuccessListener { result ->
                                 val parsed = TripOcrParser.parse(result.text)
-                                if (parsed.revenue != null) revenue = parsed.revenue.toLong().toString()
                                 if (parsed.timestamp != null) tripTime = parsed.timestamp
                                 if (parsed.pickup.isNotBlank()) pickup = parsed.pickup
                                 if (parsed.dropoff.isNotBlank()) dropoff = parsed.dropoff
                                 if (zone.isBlank()) zone = parsed.pickup.ifBlank { parsed.dropoff }
-                                ocrStatus = "Đã đọc ảnh. Tiền: " + (if (parsed.revenue != null) "đã nhận diện" else "chưa nhận diện") + ". Kiểm tra các trường rồi mới lưu."
+                                ocrStatus = "Đã đọc ảnh. Kiểm tra điểm đón và thời gian trước khi lưu."
                             }
                             .addOnFailureListener { ocrStatus = "Không đọc được ảnh. Hãy chọn ảnh khác hoặc nhập thủ công." }
                     }
@@ -108,70 +103,65 @@ class MainActivity : ComponentActivity() {
                 OutlinedButton(onClick = { imagePicker.launch("image/*") }, modifier = Modifier.fillMaxWidth()) { Text("Chọn ảnh chi tiết cuốc Xanh SM (OCR)") }
                 Text(ocrStatus, style = MaterialTheme.typography.bodySmall, color = Color.LightGray)
                 Text("Thời gian cuốc: " + SimpleDateFormat("dd/MM/yyyy HH:mm", Locale("vi","VN")).format(Date(tripTime)), style = MaterialTheme.typography.bodySmall)
-                OutlinedTextField(zone, {zone=it}, label={Text("Khu vực / tên quán")}, modifier=Modifier.fillMaxWidth(), singleLine=true)
-                OutlinedTextField(revenue, {revenue=it}, label={Text("Doanh thu (đ)")}, modifier=Modifier.fillMaxWidth(), singleLine=true)
                 OutlinedTextField(pickup, {pickup=it}, label={Text("Điểm đón (OCR, có thể sửa)")}, modifier=Modifier.fillMaxWidth(), singleLine=true)
                 OutlinedTextField(dropoff, {dropoff=it}, label={Text("Điểm trả (OCR, có thể sửa)")}, modifier=Modifier.fillMaxWidth(), singleLine=true)
-                OutlinedTextField(cost, {cost=it}, label={Text("Chi phí cuốc (đ)")}, modifier=Modifier.fillMaxWidth(), singleLine=true)
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    OutlinedTextField(startBattery, {startBattery=it.filter(Char::isDigit).take(3)}, label={Text("Pin đầu (%)")}, modifier=Modifier.weight(1f), singleLine=true)
-                    OutlinedTextField(endBattery, {endBattery=it.filter(Char::isDigit).take(3)}, label={Text("Pin cuối (%)")}, modifier=Modifier.weight(1f), singleLine=true)
-                }
-                OutlinedTextField(note, {note=it}, label={Text("Ghi chú (tùy chọn)")}, modifier=Modifier.fillMaxWidth())
                 Button(onClick = {
-                    val r=revenue.replace(",","").replace(".","").toDoubleOrNull()
-                    val c=cost.replace(",","").replace(".","").toDoubleOrNull()
-                    val sb=startBattery.toIntOrNull(); val eb=endBattery.toIntOrNull()
-                    if (zone.isNotBlank() && r != null && c != null && sb != null && eb != null && sb in 0..100 && eb in 0..100) {
-                        val arr=runCatching { JSONArray(prefs.getString("trips","[]")) }.getOrDefault(JSONArray())
-                        arr.put(JSONObject().put("time",tripTime).put("zone",zone.trim()).put("revenue",r).put("cost",c).put("startBattery",sb).put("endBattery",eb).put("note",note.trim()).put("pickup",pickup.trim()).put("dropoff",dropoff.trim()))
-                        prefs.edit().putString("trips",arr.toString()).apply()
-                        zone=""; revenue=""; note=""; pickup=""; dropoff=""; tripTime=System.currentTimeMillis(); ocrStatus="OCR xử lý trên thiết bị; hãy kiểm tra trước khi lưu."; refresh++
-                    }
-                }, modifier=Modifier.fillMaxWidth()) { Text("Lưu cuốc") }
-            } }
-            val net = trips.sumOf { it.net }
-            val used = trips.sumOf { it.batteryUsed }
-            Card { Column(Modifier.fillMaxWidth().padding(14.dp), verticalArrangement = Arrangement.spacedBy(5.dp)) {
-                Text("HIỆU QUẢ", style = MaterialTheme.typography.titleMedium)
-                Text("Doanh thu ròng: ${fmt(net)}", style = MaterialTheme.typography.titleLarge)
-                Text("Ròng trên 1% pin: ${if (used>0) fmt(net/used) else "Chưa đủ dữ liệu"}")
-                Text("Số cuốc: ${trips.size} • Điểm GPS: ${points.size}")
-            } }
-            Card { Column(Modifier.fillMaxWidth().padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Text("BẢN ĐỒ NHIỆT CÁ NHÂN", style = MaterialTheme.typography.titleMedium)
-                Text("Màu thể hiện mật độ điểm ghi nhận theo cụm GPS (không phải số cuốc). Nhập tên khu vực khi lưu cuốc để so sánh doanh thu.")
-                val buckets = points.mapNotNull { line -> line.split(",").takeIf { it.size >= 4 }?.let { it[1].toDoubleOrNull() to it[2].toDoubleOrNull() } }.filter { it.first != null && it.second != null }
-                Canvas(Modifier.fillMaxWidth().height(180.dp)) {
-                    drawRect(Color(0xFF14202A))
-                    if (buckets.isNotEmpty()) {
-                        val minLat=buckets.minOf { it.first!! }; val maxLat=buckets.maxOf { it.first!! }
-                        val minLon=buckets.minOf { it.second!! }; val maxLon=buckets.maxOf { it.second!! }
-                        buckets.forEach { pair ->
-                            val x=if(maxLon-minLon<1e-6) size.width/2 else ((pair.second!!-minLon)/(maxLon-minLon)*size.width).toFloat()
-                            val y=if(maxLat-minLat<1e-6) size.height/2 else (size.height-(pair.first!!-minLat)/(maxLat-minLat)*size.height).toFloat()
-                            drawCircle(if(buckets.size>50) Color(0xFFE64A45) else Color(0xFFFFC857), radius=7f, center=androidx.compose.ui.geometry.Offset(x,y), alpha=0.65f)
+                    val address = pickup.trim()
+                    if (address.isNotBlank()) {
+                        val arr = runCatching { JSONArray(prefs.getString("trips", "[]")) }.getOrDefault(JSONArray())
+                        val duplicate = (0 until arr.length()).any { i ->
+                            val old = arr.getJSONObject(i)
+                            old.optString("pickup").trim().equals(address, ignoreCase = true) && kotlin.math.abs(old.optLong("time") - tripTime) < 120000L
                         }
-                    }
-                }
-                Text("Hiện có ${points.size} điểm. Hãy bật theo dõi khi bắt đầu ca để tích lũy dữ liệu.")
+                        if (duplicate) { ocrStatus = "Có vẻ cuốc này đã lưu trong vòng 2 phút; không lưu trùng." }
+                        else {
+                            arr.put(JSONObject().put("time", tripTime).put("zone", address).put("revenue", 0).put("cost", 0).put("startBattery", 0).put("endBattery", 0).put("note", "").put("pickup", address).put("dropoff", dropoff.trim()))
+                            prefs.edit().putString("trips", arr.toString()).apply()
+                            pickup = ""; dropoff = ""; tripTime = System.currentTimeMillis(); ocrStatus = "Đã lưu quan sát điểm đón."; refresh++
+                        }
+                    } else ocrStatus = "Cần có địa chỉ điểm đón để đưa vào bản đồ nhiệt."
+                }, modifier=Modifier.fillMaxWidth()) { Text("Lưu điểm nhu cầu") }
             } }
-            Text("NHẬT KÝ CUỐC", style = MaterialTheme.typography.titleMedium)
+            var days by remember { mutableIntStateOf(7) }
+            val cutoff = System.currentTimeMillis() - days.toLong() * 24L * 60L * 60L * 1000L
+            val observations = trips.filter { it.time >= cutoff && it.pickup.isNotBlank() }
+            val hotspots = observations.groupBy { it.pickup.trim().lowercase(Locale("vi", "VN")) }.entries.sortedByDescending { it.value.size }
+            Card { Column(Modifier.fillMaxWidth().padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text("BẢN ĐỒ NHIỆT ĐIỂM ĐÓN", style = MaterialTheme.typography.titleMedium)
+                Text("Chỉ phản ánh các cuốc bạn đã tự ghi nhận, không đại diện toàn bộ nhu cầu Xanh SM.", style = MaterialTheme.typography.bodySmall)
+                SingleChoiceSegmentedButtonRow(modifier = Modifier.fillMaxWidth()) {
+                    listOf(1, 3, 7).forEachIndexed { i, d -> SegmentedButton(selected = days == d, onClick = { days = d }, shape = SegmentedButtonDefaults.itemShape(index = i, count = 3)) { Text("${d} ngày") } }
+                }
+                Text("${observations.size} cuốc đã ghi nhận • ${hotspots.size} địa chỉ điểm đón")
+                val hours = observations.groupBy { SimpleDateFormat("HH", Locale.US).format(Date(it.time)) }.toSortedMap()
+                Text("Số cuốc theo giờ", style = MaterialTheme.typography.titleSmall)
+                hours.forEach { (hour, items) -> Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text("${hour}:00", modifier = Modifier.width(54.dp))
+                    Box(Modifier.weight(1f).height(18.dp)) { Canvas(Modifier.fillMaxSize()) { drawRect(Color(0xFF263746)); drawRect(Color(0xFFE6A23C), size = androidx.compose.ui.geometry.Size(size.width * items.size.toFloat() / observations.size.coerceAtLeast(1), size.height)) } }
+                    Text(items.size.toString())
+                } }
+                Text("Khu vực đông nhất", style = MaterialTheme.typography.titleSmall)
+                if (hotspots.isEmpty()) Text("Chưa có dữ liệu trong ${days} ngày gần đây.")
+                hotspots.take(10).forEachIndexed { i, entry -> Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text("${i + 1}.", modifier = Modifier.width(24.dp)); Text(entry.value.first().pickup, modifier = Modifier.weight(1f)); Text("${entry.value.size} cuốc")
+                } }
+                Text("GPS là dữ liệu di chuyển riêng, không được tính là cuốc. Bản đồ địa lý cần bổ sung geocoding và lớp bản đồ.", style = MaterialTheme.typography.bodySmall, color = Color.LightGray)
+            } }
+            Text("LỊCH SỬ ĐIỂM ĐÓN", style = MaterialTheme.typography.titleMedium)
             if (trips.isEmpty()) Text("Chưa có cuốc. Dữ liệu mẫu không được tạo tự động.")
             trips.forEach { trip ->
                 Card { Column(Modifier.fillMaxWidth().padding(12.dp), verticalArrangement = Arrangement.spacedBy(3.dp)) {
                     Text(trip.zone, style = MaterialTheme.typography.titleMedium)
                     Text(SimpleDateFormat("dd/MM HH:mm", Locale("vi","VN")).format(Date(trip.time)))
-                    Text("Ròng: ${fmt(trip.net)} • Pin: ${trip.batteryUsed}% • ${fmt(trip.netPerPercent)}/1% pin")
+
                     if(trip.pickup.isNotBlank()) Text("Đón: " + trip.pickup)
                     if(trip.dropoff.isNotBlank()) Text("Trả: " + trip.dropoff)
-                    if(trip.note.isNotBlank()) Text(trip.note)
                 } }
             }
             OutlinedButton(onClick = {
                 val data = buildString {
-                    append("timestamp,zone,revenue,cost,start_battery,end_battery,net,pickup,dropoff\n")
-                    trips.reversed().forEach { append("${it.time},\"${it.zone.replace("\"","")}\",${it.revenue},${it.cost},${it.startBattery},${it.endBattery},${it.net},\"${it.pickup.replace("\"","")}\",\"${it.dropoff.replace("\"","")}\"\n") }
+                    append("timestamp,pickup,dropoff\n")
+                    trips.reversed().forEach { append("${it.time},\"${it.pickup.replace("\"", "")}\",\"${it.dropoff.replace("\"", "")}\"\n") }
                 }
                 val name="driver-hotspot-trips.csv"
                 getExternalFilesDir(null)?.resolve(name)?.writeText(data)
