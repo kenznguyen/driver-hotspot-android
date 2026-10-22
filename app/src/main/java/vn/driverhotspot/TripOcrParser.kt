@@ -65,6 +65,27 @@ object TripOcrParser {
         var dropoff = ""
         var placeName = ""
         var section = ""
+        val pickupLabelIndex = normalized.indexOfFirst { it.startsWith("điểm đón khách") || it == "điểm đón" || it == "đón khách" || it == "địa chỉ đón" }
+        val orderCardIndex = normalized.indexOfFirst { it.startsWith("điểm lấy hàng") || it.startsWith("điểm lấy đồ") || it.startsWith("địa điểm lấy hàng") }
+        if (pickupLabelIndex < 0 && orderCardIndex >= 0) {
+            val cardLines = lines.drop(orderCardIndex + 1).take(8)
+            placeName = cardLines.firstOrNull { line ->
+                val n = line.lowercase(Locale("vi", "VN"))
+                !isNonLocationLine(n) && !n.startsWith("mã đơn") && !n.startsWith("danh sách món") &&
+                    !n.startsWith("gọi quán") && !n.startsWith("điều hướng") &&
+                    !n.startsWith("đã nhận đơn") && !n.startsWith("địa đi") &&
+                    !Regex("""^\d+\s*\.\s*""").containsMatchIn(n)
+            }.orEmpty()
+            pickup = cardLines.firstOrNull { line ->
+                val n = line.lowercase(Locale("vi", "VN"))
+                (n.contains("đường") || n.contains("phường") || n.contains("thành phố") ||
+                    n.contains("quận") || n.contains("huyện") || Regex("""\b\d{1,4}[a-z]?\s+[^,]+""").containsMatchIn(n)) &&
+                    !n.startsWith("mã đơn")
+            }.orEmpty()
+            if (pickup.isBlank() && placeName.isNotBlank() && Regex("""\b\d+[a-z]?\s+.+""", RegexOption.IGNORE_CASE).containsMatchIn(placeName)) {
+                pickup = placeName
+            }
+        }
         for (i in lines.indices) {
             val line = lines[i]
             val n = normalized[i]
