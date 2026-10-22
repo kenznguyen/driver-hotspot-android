@@ -29,11 +29,17 @@ object TripOcrParser {
             }
         }
         var timestamp: Long? = null
-        for (line in lines) {
+        val dateMatcher = Pattern.compile("\\\\b\\\\d{1,2}[/-]\\\\d{1,2}(?:[/-]\\\\d{4})?\\\\s+\\\\d{1,2}:\\\\d{2}\\\\b").matcher(rawText)
+        if (dateMatcher.find()) {
+            val dateText = dateMatcher.group()
             for (format in datePatterns) {
-                runCatching { format.isLenient = false; format.parse(line)?.time }.getOrNull()?.let { timestamp = it; break }
+                runCatching { format.isLenient = false; format.parse(dateText)?.time }.getOrNull()?.let { timestamp = it; if (dateText.count { c -> c == '/' || c == '-' } == 1) {
+                    val currentYear = java.util.Calendar.getInstance().get(java.util.Calendar.YEAR)
+                    val calendar = java.util.Calendar.getInstance().apply { timeInMillis = it; set(java.util.Calendar.YEAR, currentYear) }
+                    timestamp = calendar.timeInMillis
+                }; return@let }
+                if (timestamp != null) break
             }
-            if (timestamp != null) break
         }
         var pickup = ""
         var dropoff = ""
