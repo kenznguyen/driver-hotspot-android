@@ -26,7 +26,7 @@ object TripOcrParser {
 
     fun parse(rawText: String): TripOcrResult {
         val lines = rawText.lines().map { it.trim().replace(Regex("""\s+"""), " ") }.filter { it.isNotBlank() }
-        val normalized = lines.map { it.lowercase(Locale("vi", "VN")) }
+        val normalized = lines.map { it.lowercase(Locale("vi", "VN")).replace(Regex("""^\\s*\\d+\\s*[.)-]?\\s*"""), "").trim() }
         var revenue: Double? = null
         val revenueLabels = listOf("khách thanh toán", "thành tiền", "tổng tiền", "doanh thu",
             "tiền cuốc", "giá cước", "cước phí", "thu nhập", "tổng thu nhập")
