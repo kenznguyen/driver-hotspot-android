@@ -31,7 +31,7 @@ import java.util.Date
 import java.util.Locale
 import kotlin.math.max
 
-data class Trip(val time: Long, val zone: String, val revenue: Double, val cost: Double, val startBattery: Int, val endBattery: Int, val note: String, val pickup: String = "", val dropoff: String = "") {
+data class Trip(val time: Long, val zone: String, val revenue: Double, val cost: Double, val startBattery: Int, val endBattery: Int, val note: String, val pickup: String = "", val dropoff: String = "", val placeName: String = "") {
     val net get() = revenue - cost
     val batteryUsed get() = max(0, startBattery - endBattery)
     val netPerPercent get() = if (batteryUsed > 0) net / batteryUsed else 0.0
